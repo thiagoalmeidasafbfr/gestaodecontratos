@@ -40,9 +40,17 @@ const initialTransfersData = [
     otherOwners: [
       { name: 'Atlanta United', percentage: 20 },
       { name: 'Próprio Atleta', percentage: 10 }
+    ],
+    // NOVO: Campos Salário
+    salaryCLT: 250000,
+    salaryImage: 100000,
+    hasProgressiveRaise: true,
+    progressiveRaises: [
+      { value: 10, unit: '%', date: '2025-07-01' },
+      { value: 50000, unit: 'BRL', date: '2026-07-01' }
     ]
   },
-  { id: 2, playerId: 'henrique_luiz', year: 2024, name: 'Luiz Henrique', position: 'AD', type: 'buy', value: 16000000, marketValue: 15000000, club: 'Real Betis', dob: '2001-01-02', photoUrl: 'https://placehold.co/100x100/2d3748/ffffff?text=L.+Henrique', contractStartDate: '2024-02-01', contractEndDate: '2028-12-31', is100percent: true, safPercentage: 100 },
+  { id: 2, playerId: 'henrique_luiz', year: 2024, name: 'Luiz Henrique', position: 'AD', type: 'buy', value: 16000000, marketValue: 15000000, club: 'Real Betis', dob: '2001-01-02', photoUrl: 'https://placehold.co/100x100/2d3748/ffffff?text=L.+Henrique', contractStartDate: '2024-02-01', contractEndDate: '2028-12-31', is100percent: true, safPercentage: 100, salaryCLT: 200000, salaryImage: 80000, hasProgressiveRaise: false, progressiveRaises: [] },
 ];
 
 const POSITION_ORDER = ['G', 'Z', 'LE', 'LD', 'V', 'MO', 'AE', 'AD', 'AC'];
@@ -76,6 +84,7 @@ const formatCurrency = (value, showM = true) => {
     const valM = value / 1000000;
     return `€${valM.toFixed(1)}M`;
   }
+  // ATENÇÃO: Esta função formata como EUR (€). Pode precisar de ajuste se a moeda base mudar.
   return `€${value.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`;
 };
 const formatDate = (dateString) => {
@@ -96,13 +105,13 @@ const isCloseToDue = (dateString, days = 30) => {
   const today = new Date();
   today.setHours(0, 0, 0, 0); // Normaliza hoje
   const dueDate = new Date(dateString + 'T00:00:00');
- 
+  
   // Se já passou (é ontem ou antes), não está "próximo de vencer", está "atrasado"
   if (dueDate < today) return false; 
 
   const timeDiff = dueDate.getTime() - today.getTime();
   const dayDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
- 
+  
   // É hoje ou nos próximos 30 dias?
   return dayDiff >= 0 && dayDiff <= days; 
 };
@@ -112,11 +121,11 @@ const getInstallmentStatusProps = (inst) => {
   if (inst.status === 'paid') {
     return { label: 'Pago', color: 'text-green-500', icon: CheckCircle };
   }
- 
+  
   if (isOverdue(inst.date)) {
     return { label: 'Atrasado', color: 'text-red-500', icon: AlertTriangle };
   }
- 
+  
   // O '30' pode ser ajustado
   if (isCloseToDue(inst.date, 30)) { 
     return { label: 'Vence em breve', color: 'text-orange-500', icon: Clock };
@@ -197,7 +206,14 @@ const TransferSubForm = ({ transfer, onSave, onCancel }) => {
     playerBonus: 0, playerBonusDate: '', agentBonus: 0, agentBonusDate: '',
     intermediaries: [], triggers: [],
     // NOVO: Campos de Propriedade
-    is100percent: true, safPercentage: 100, otherOwners: []
+    is100percent: true, safPercentage: 100, otherOwners: [],
+    // NOVO: Campos Salário
+    salaryCLT: 0,
+    salaryImage: 0,
+    hasProgressiveRaise: false,
+    progressiveRaises: [],
+    // NOVO: Cláusula de Vencimento Antecipado
+    hasAccelerationClause: false
   });
   const [activeTab, setActiveTab] = useState('geral');
 
@@ -225,7 +241,7 @@ const TransferSubForm = ({ transfer, onSave, onCancel }) => {
     const totalValue = Number(formData.value) || 0;
     const installmentValue = totalValue / count;
     const today = new Date();
-   
+    
     const newInstallments = Array.from({ length: count }, (_, i) => {
       const date = new Date(today);
       date.setMonth(today.getMonth() + (i * 6)); // Default 6 meses
@@ -272,6 +288,11 @@ const TransferSubForm = ({ transfer, onSave, onCancel }) => {
     return Number(formData.safPercentage || 0) + others;
   }, [formData.is100percent, formData.safPercentage, formData.otherOwners]);
 
+  // NOVO: Gerenciamento de Aumento Salarial
+  const addRaise = () => setFormData(prev => ({ ...prev, progressiveRaises: [...(prev.progressiveRaises || []), { value: 0, unit: '%', date: '' }] }));
+  const removeRaise = (idx) => setFormData(prev => ({ ...prev, progressiveRaises: prev.progressiveRaises.filter((_, i) => i !== idx) }));
+  const updateRaise = (idx, field, val) => setFormData(prev => ({ ...prev, progressiveRaises: prev.progressiveRaises.map((item, i) => i === idx ? { ...item, [field]: val } : item) }));
+
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -280,7 +301,10 @@ const TransferSubForm = ({ transfer, onSave, onCancel }) => {
       value: Number(formData.value), marketValue: Number(formData.marketValue), year: Number(formData.year),
       originalValue: Number(formData.originalValue), exchangeRate: Number(formData.exchangeRate),
       installments: Number(formData.installments), playerBonus: Number(formData.playerBonus), agentBonus: Number(formData.agentBonus),
-      safPercentage: Number(formData.safPercentage)
+      safPercentage: Number(formData.safPercentage),
+      // Campos de Salário
+      salaryCLT: Number(formData.salaryCLT || 0),
+      salaryImage: Number(formData.salaryImage || 0)
     });
   };
 
@@ -290,31 +314,32 @@ const TransferSubForm = ({ transfer, onSave, onCancel }) => {
         <div className={`p-6 border-b flex justify-between items-center ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
           <h3 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{transfer ? 'Editar Detalhes da Transação' : 'Nova Transação'}</h3>
           <div className={`flex gap-2 p-1 rounded-lg ${isDark ? 'bg-gray-900' : 'bg-gray-100'}`}>
-            {['geral', 'financeiro', 'contratos'].map(tab => (
+            {/* ABA "SALÁRIO" ADICIONADA */}
+            {['geral', 'financeiro', 'salario', 'contratos'].map(tab => (
               <button key={tab} onClick={() => setActiveTab(tab)} className={`px-3 py-1.5 text-xs font-bold uppercase rounded-md transition-all ${activeTab === tab ? (isDark ? 'bg-white text-black' : 'bg-white text-blue-600 shadow-sm') : (isDark ? 'text-gray-400 hover:text-white' : 'text-gray-500 hover:text-gray-900')}`}>{tab}</button>
             ))}
           </div>
         </div>
-       
+        
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
           {activeTab === 'geral' && (
             <div className="grid grid-cols-2 gap-4 animate-fadeIn">
-                <div><label className={modalLabelStyle}>Ano da Transação</label><input type="number" required value={formData.year} onChange={e => setFormData({...formData, year: e.target.value})} className={modalInputStyle} /></div>
-                <div>
+               <div><label className={modalLabelStyle}>Ano da Transação</label><input type="number" required value={formData.year} onChange={e => setFormData({...formData, year: e.target.value})} className={modalInputStyle} /></div>
+               <div>
                   <label className={modalLabelStyle}>Tipo</label>
                   <select value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})} className={modalInputStyle}>
                     {Object.entries(CONTRACT_TYPES).map(([key, { label }]) => (
                       <option key={key} value={key}>{label}</option>
                     ))}
                   </select>
-                </div>
-                <div className="col-span-2"><label className={modalLabelStyle}>Clube Parceiro</label><input type="text" required value={formData.club} onChange={e => setFormData({...formData, club: e.target.value})} className={modalInputStyle} placeholder="Ex: Flamengo" /></div>
-                <div className="col-span-2 grid grid-cols-2 gap-4 pt-2 border-t border-dashed border-gray-700/50">
+               </div>
+               <div className="col-span-2"><label className={modalLabelStyle}>Clube Parceiro</label><input type="text" required value={formData.club} onChange={e => setFormData({...formData, club: e.target.value})} className={modalInputStyle} placeholder="Ex: Flamengo" /></div>
+               <div className="col-span-2 grid grid-cols-2 gap-4 pt-2 border-t border-dashed border-gray-700/50">
                   <div><label className={modalLabelStyle}>Início do Contrato</label><input type="date" value={formData.contractStartDate} onChange={e => setFormData({...formData, contractStartDate: e.target.value})} className={modalInputStyle} /></div>
                   <div><label className={modalLabelStyle}>Fim do Contrato</label><input type="date" value={formData.contractEndDate} onChange={e => setFormData({...formData, contractEndDate: e.target.value})} className={modalInputStyle} /></div>
-                </div>
-                {/* 'Idade' removido */}
-                <div><label className={modalLabelStyle}>Posição (na época)</label><select value={formData.position} onChange={e => setFormData({...formData, position: e.target.value})} className={modalInputStyle}>{POSITION_ORDER.map(pos => <option key={pos} value={pos}>{pos}</option>)}</select></div>
+               </div>
+               {/* 'Idade' removido */}
+               <div><label className={modalLabelStyle}>Posição (na época)</label><select value={formData.position} onChange={e => setFormData({...formData, position: e.target.value})} className={modalInputStyle}>{POSITION_ORDER.map(pos => <option key={pos} value={pos}>{pos}</option>)}</select></div>
             </div>
           )}
           {activeTab === 'financeiro' && (
@@ -334,7 +359,19 @@ const TransferSubForm = ({ transfer, onSave, onCancel }) => {
                   {/* NOVO: Texto abaixo do botão */}
                   <span className={`text-xs ml-1 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Atualizar câmbio</span>
                 </div>
-                <div className="col-span-3 flex items-center h-[48px]"><label className={`flex items-center gap-2 cursor-pointer ${isDark ? 'text-gray-300' : 'text-gray-700'}`}><input type="checkbox" checked={formData.isFixedRate} onChange={e => setFormData({...formData, isFixedRate: e.target.checked})} className="w-4 h-4 rounded" /><span className="text-sm font-medium flex items-center gap-1">{formData.isFixedRate ? <Lock className="w-3 h-3"/> : <Unlock className="w-3 h-3 text-gray-500"/>} Câmbio Fixado</span></label></div>
+                {/* ATUALIZADO: col-span-3 para col-span-4 e flex-col para os checkboxes */}
+                <div className="col-span-3 flex flex-col justify-center h-[48px] gap-2">
+                  <label className={`flex items-center gap-2 cursor-pointer ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                    <input type="checkbox" checked={formData.isFixedRate} onChange={e => setFormData({...formData, isFixedRate: e.target.checked})} className="w-4 h-4 rounded" />
+                    <span className="text-sm font-medium flex items-center gap-1">{formData.isFixedRate ? <Lock className="w-3 h-3"/> : <Unlock className="w-3 h-3 text-gray-500"/>} Câmbio Fixado</span>
+                  </label>
+                  
+                  {/* NOVO: Checkbox de Vencimento Antecipado */}
+                  <label className={`flex items-center gap-2 cursor-pointer ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                    <input type="checkbox" checked={formData.hasAccelerationClause} onChange={e => setFormData({...formData, hasAccelerationClause: e.target.checked})} className="w-4 h-4 rounded" />
+                    <span className="text-sm font-medium flex items-center gap-1">Venc. Antecipado</span>
+                  </label>
+                </div>
                 <div className="col-span-4"><label className={modalLabelStyle}>Valor Final (€)</label><input type="text" value={formatCurrency(formData.value, false)} disabled className={`${modalInputStyle} font-bold opacity-80`} /></div>
               </div>
               <div className={`border-t pt-4 ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
@@ -350,18 +387,18 @@ const TransferSubForm = ({ transfer, onSave, onCancel }) => {
                 {/* LISTA DE PARCELAS (Com lixeira) */}
                 {formData.paymentMethod === 'Parcelado' && formData.installmentsDetails?.length > 0 && (
                   <div className={`mt-4 p-3 rounded-xl space-y-2 max-h-48 overflow-y-auto custom-scrollbar ${isDark ? 'bg-black/30' : 'bg-gray-50 border border-gray-200'}`}>
-                      {formData.installmentsDetails.map((inst, idx) => (
-                        <div key={idx} className="flex gap-2 items-center text-sm">
-                          <span className={`w-8 font-bold ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>#{inst.number}</span>
-                          <input type="date" value={inst.date} onChange={e => updateInstallment(idx, 'date', e.target.value)} className={`${modalInputStyle} !py-1.5 !text-sm`} />
-                          <input type="number" value={inst.value} onChange={e => updateInstallment(idx, 'value', e.target.value)} className={`${modalInputStyle} !py-1.5 !text-sm flex-1`} />
-                          <select value={inst.status} onChange={e => updateInstallment(idx, 'status', e.target.value)} className={`${modalInputStyle} !py-1.5 !text-sm w-28 ${inst.status === 'paid' ? 'text-green-500' : 'text-yellow-500'}`}>
-                            <option value="pending">Pendente</option><option value="paid">Pago</option>
-                          </select>
-                          {/* NOVO: Botão de lixeira */}
-                          <button type="button" onClick={() => removeInstallment(idx)} className={`p-1.5 rounded transition-colors ${isDark ? 'text-gray-600 hover:text-red-500 hover:bg-red-500/10' : 'text-gray-400 hover:text-red-600 hover:bg-red-100'}`}><Trash2 className="w-4 h-4"/></button>
-                        </div>
-                      ))}
+                     {formData.installmentsDetails.map((inst, idx) => (
+                       <div key={idx} className="flex gap-2 items-center text-sm">
+                         <span className={`w-8 font-bold ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>#{inst.number}</span>
+                         <input type="date" value={inst.date} onChange={e => updateInstallment(idx, 'date', e.target.value)} className={`${modalInputStyle} !py-1.5 !text-sm`} />
+                         <input type="number" value={inst.value} onChange={e => updateInstallment(idx, 'value', e.target.value)} className={`${modalInputStyle} !py-1.5 !text-sm flex-1`} />
+                         <select value={inst.status} onChange={e => updateInstallment(idx, 'status', e.target.value)} className={`${modalInputStyle} !py-1.5 !text-sm w-28 ${inst.status === 'paid' ? 'text-green-500' : 'text-yellow-500'}`}>
+                           <option value="pending">Pendente</option><option value="paid">Pago</option>
+                         </select>
+                         {/* NOVO: Botão de lixeira */}
+                         <button type="button" onClick={() => removeInstallment(idx)} className={`p-1.5 rounded transition-colors ${isDark ? 'text-gray-600 hover:text-red-500 hover:bg-red-500/10' : 'text-gray-400 hover:text-red-600 hover:bg-red-100'}`}><Trash2 className="w-4 h-4"/></button>
+                       </div>
+                     ))}
                   </div>
                 )}
               </div>
@@ -371,6 +408,58 @@ const TransferSubForm = ({ transfer, onSave, onCancel }) => {
                 <div><label className={modalLabelStyle}>Luvas Intermediário (€)</label><input type="number" value={formData.agentBonus} onChange={e => setFormData({...formData, agentBonus: e.target.value})} className={modalInputStyle} /></div>
                 <div><label className={modalLabelStyle}>Vencimento Luvas Int.</label><input type="date" value={formData.agentBonusDate} onChange={e => setFormData({...formData, agentBonusDate: e.target.value})} className={modalInputStyle} /></div>
               </div>
+            </div>
+          )}
+          {/* CONTEÚDO DA NOVA ABA "SALÁRIO" */}
+          {activeTab === 'salario' && (
+            <div className="space-y-6 animate-fadeIn">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={modalLabelStyle}>Salário CLT (Valor Mensal €)</label>
+                  <input type="number" value={formData.salaryCLT} onChange={e => setFormData({...formData, salaryCLT: e.target.value})} className={modalInputStyle} />
+                </div>
+                <div>
+                  <label className={modalLabelStyle}>Salário Imagem (Valor Mensal €)</label>
+                  <input type="number" value={formData.salaryImage} onChange={e => setFormData({...formData, salaryImage: e.target.value})} className={modalInputStyle} />
+                </div>
+              </div>
+              <div className={`border-t pt-4 ${isDark ? 'border-gray-800' : 'border-gray-200'}`}>
+                <label className={`flex items-center gap-2 cursor-pointer ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                  <input type="checkbox" checked={formData.hasProgressiveRaise} onChange={e => setFormData({...formData, hasProgressiveRaise: e.target.checked})} className="w-4 h-4 rounded" />
+                  <span className="text-sm font-medium">Salário tem aumento progressivo</span>
+                </label>
+              </div>
+
+              {formData.hasProgressiveRaise && (
+                <div className={`mt-4 p-4 rounded-xl space-y-3 border ${isDark ? 'bg-gray-900/50 border-gray-800' : 'bg-gray-50 border-gray-200'}`}>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className={`${modalLabelStyle} ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Aumentos Programados</label>
+                    <button type="button" onClick={addRaise} className={`text-xs px-2 py-1 rounded transition-colors ${isDark ? 'bg-gray-800 hover:bg-gray-700 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-900'}`}>+ Adicionar Aumento</button>
+                  </div>
+                  {formData.progressiveRaises?.map((raise, idx) => (
+                    <div key={idx} className="flex gap-2 items-end">
+                      <div className="flex-1">
+                        <label className={modalLabelStyle}>Valor do Aumento</label>
+                        <input type="number" value={raise.value} onChange={e => updateRaise(idx, 'value', e.target.value)} className={modalInputStyle} />
+                      </div>
+                      <div className="w-28">
+                        <label className={modalLabelStyle}>Unidade</label>
+                        <select value={raise.unit} onChange={e => updateRaise(idx, 'unit', e.target.value)} className={modalInputStyle}>
+                          <option value="%">%</option>
+                          <option value="BRL">R$</option>
+                          <option value="EUR">€</option>
+                          <option value="USD">$</option>
+                        </select>
+                      </div>
+                      <div className="flex-1">
+                        <label className={modalLabelStyle}>Data do Aumento</label>
+                        <input type="date" value={raise.date} onChange={e => updateRaise(idx, 'date', e.target.value)} className={modalInputStyle} />
+                      </div>
+                      <button type="button" onClick={() => removeRaise(idx)} className={`p-3 mb-[1px] rounded-xl transition-colors ${isDark ? 'text-red-500/80 hover:bg-red-500/20' : 'text-red-600 hover:bg-red-100'}`}><Trash2 className="w-4 h-4"/></button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {activeTab === 'contratos' && (
@@ -424,7 +513,7 @@ const TransferSubForm = ({ transfer, onSave, onCancel }) => {
                         <option value="hit">Atingido</option>
                       </select>
                       <input type="number" placeholder="Valor" value={item.value} onChange={e => updateTrigger(idx, 'value', e.target.value)} className={`${modalInputStyle} w-28`} />
-                     
+                      
                       {/* NOVO: Seletor de Moeda do Gatilho */}
                       <select 
                         value={item.currency || 'EUR'} 
@@ -433,7 +522,7 @@ const TransferSubForm = ({ transfer, onSave, onCancel }) => {
                       >
                         {Object.keys(CURRENCIES).map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
-                     
+                      
                       <button type="button" onClick={() => removeTrigger(idx)} className="p-2 text-red-500 hover:bg-red-500/10 rounded"><Trash2 className="w-5 h-5"/></button>
                     </div>
 
@@ -496,7 +585,7 @@ const MasterPlayerEditor = ({ playerGroup, existingPlayers, onSave, onCancel }) 
   const editorLabelStyle = `block text-xs mb-1.5 uppercase tracking-wider font-semibold ${isDark ? 'text-gray-400' : 'text-gray-600'}`;
 
   useEffect(() => { if (!playerGroup && playerInfo.name && !playerInfo.playerId) { setPlayerInfo(prev => ({ ...prev, playerId: playerInfo.name.toLowerCase().replace(/\s+/g, '_') })); } }, [playerInfo.name]);
- 
+  
   const handleSaveMaster = () => { 
     if (!playerInfo.name || !playerInfo.playerId || !playerInfo.dob) { 
       alert("Nome, ID e Data de Nascimento são obrigatórios."); return; 
@@ -512,7 +601,7 @@ const MasterPlayerEditor = ({ playerGroup, existingPlayers, onSave, onCancel }) 
     })); 
     onSave(playerInfo.playerId, playerGroup?.playerId, finalTransactions); 
   };
- 
+  
   const handleSaveTransfer = (transferData) => { 
     if (editingTransfer) { 
       setTransactions(prev => prev.map(t => t.id === transferData.id ? transferData : t)); 
@@ -523,7 +612,7 @@ const MasterPlayerEditor = ({ playerGroup, existingPlayers, onSave, onCancel }) 
     setShowTransferForm(false); 
     setEditingTransfer(null); 
   };
- 
+  
   const handleDeleteTransfer = (id) => { if (window.confirm('Remover esta movimentação?')) { setTransactions(prev => prev.filter(t => t.id !== id)); } };
 
   return (
@@ -546,7 +635,7 @@ const MasterPlayerEditor = ({ playerGroup, existingPlayers, onSave, onCancel }) 
                 <div><label className={`${editorLabelStyle} flex items-center gap-1 text-blue-500`}><Fingerprint className="w-3 h-3"/> ID Único (Agrupador)</label><input type="text" value={playerInfo.playerId} onChange={e => setPlayerInfo({...playerInfo, playerId: e.target.value})} className={`${editorInputStyle} ${isDark ? 'border-blue-900/50 bg-blue-950/20' : 'border-blue-200 bg-blue-50'}`} required/></div>
                 {/* NOVO: Data de Nascimento */}
                 <div><label className={`${editorLabelStyle} text-green-500`}><Calendar className="w-3 h-3 inline-block mr-1"/> Data de Nascimento</label><input type="date" value={playerInfo.dob} onChange={e => setPlayerInfo({...playerInfo, dob: e.target.value})} className={`${editorInputStyle} ${isDark ? 'border-green-900/50 bg-green-950/20' : 'border-green-200 bg-green-50'}`} required/></div>
-               
+                
                 <div><label className={editorLabelStyle}>Posição Padrão</label><select value={playerInfo.defaultPosition} onChange={e => setPlayerInfo({...playerInfo, defaultPosition: e.target.value})} className={editorInputStyle}>{POSITION_ORDER.map(pos => <option key={pos} value={pos}>{pos}</option>)}</select></div>
                 <div className="md:col-span-2"><label className={editorLabelStyle}>URL da Foto</label><input type="text" value={playerInfo.photoUrl} onChange={e => setPlayerInfo({...playerInfo, photoUrl: e.target.value})} className={editorInputStyle} placeholder="https://..."/></div>
               </div>
@@ -579,9 +668,58 @@ const DataManagement = ({ transfers, onUpdate, onBack }) => {
   const handleSaveMaster = useCallback((newId, oldId, newTrans) => { let updated = [...transfers]; if (oldId) { updated = updated.filter(t => t.playerId !== oldId); } updated = [...updated, ...newTrans]; onUpdate(updated); setShowMasterForm(false); setEditingGroup(null); }, [transfers, onUpdate]);
   const handleDeletePlayer = useCallback((pid) => { if (window.confirm('Excluir jogador e histórico?')) { onUpdate(transfers.filter(t => t.playerId !== pid)); } }, [transfers, onUpdate]);
   const handleDeleteAll = useCallback(() => { if (window.confirm('ATENÇÃO: Apagar TODOS os registros?')) { if (window.confirm('Confirmação final: Limpar TUDO?')) { onUpdate([]); } } }, [onUpdate]);
-  // ATUALIZADO: Export/Import com 'dob' e campos de propriedade
-  const handleExport = useCallback(() => { const headers = ['id', 'playerId', 'name', 'position', 'type', 'club', 'year', 'dob', 'value', 'marketValue', 'photoUrl', 'currency', 'originalValue', 'exchangeRate', 'isFixedRate', 'paymentMethod', 'installments', 'installmentsDetails', 'playerBonus', 'playerBonusDate', 'agentBonus', 'agentBonusDate', 'intermediaries', 'triggers', 'contractStartDate', 'contractEndDate', 'is100percent', 'safPercentage', 'otherOwners']; const csvString = [headers.join(','), ...transfers.map(t => headers.map(h => { const val = t[h]; if (Array.isArray(val) || typeof val === 'object') return `"${JSON.stringify(val).replace(/"/g, '""')}"`; return JSON.stringify(val || ''); }).join(','))].join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([csvString], { type: 'text/csv;charset=utf-8;' })); link.setAttribute('download', `botafogo_db_full_${new Date().toISOString().slice(0,10)}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link); }, [transfers]);
-  const handleImport = useCallback((e) => { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = (evt) => { try { const text = evt.target.result; const lines = text.split('\n').filter(l => l.trim()); const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim()); const newTransfers = []; for (let i = 1; i < lines.length; i++) { const values = lines[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g); if (values && values.length >= headers.length) { const entry = {}; headers.forEach((header, index) => { let val = values[index] ? values[index].replace(/^"|"$/g, '').replace(/""/g, '"') : ''; if (['intermediaries', 'triggers', 'installmentsDetails', 'otherOwners'].includes(header)) { try { entry[header] = JSON.parse(val); } catch { entry[header] = []; } } else if (['value', 'marketValue', 'year', 'id', 'originalValue', 'exchangeRate', 'installments', 'playerBonus', 'agentBonus', 'safPercentage'].includes(header)) entry[header] = Number(val) || 0; else if (['isFixedRate', 'is100percent'].includes(header)) entry[header] = val === 'true'; else entry[header] = val; }); if (!entry.id) entry.id = Date.now() + i; if (!entry.playerId) entry.playerId = entry.name ? entry.name.toLowerCase().replace(/\s+/g, '_') : `p_${entry.id}`; newTransfers.push(entry); } } if (window.confirm(`Importar ${newTransfers.length} registros?`)) onUpdate(newTransfers); } catch (err) { alert('Erro na importação CSV.'); } }; reader.readAsText(file); e.target.value = ''; }, [onUpdate]);
+  
+  // ATUALIZADO: Export/Import com campos de salário
+  const handleExport = useCallback(() => { 
+    const headers = [
+      'id', 'playerId', 'name', 'position', 'type', 'club', 'year', 'dob', 
+      'value', 'marketValue', 'photoUrl', 'currency', 'originalValue', 'exchangeRate', 'isFixedRate', 
+      'paymentMethod', 'installments', 'installmentsDetails', 
+      'playerBonus', 'playerBonusDate', 'agentBonus', 'agentBonusDate', 
+      'intermediaries', 'triggers', 'contractStartDate', 'contractEndDate', 
+      'is100percent', 'safPercentage', 'otherOwners',
+      // CAMPOS ADICIONADOS
+      'salaryCLT', 'salaryImage', 'hasProgressiveRaise', 'progressiveRaises',
+      // CAMPO DE VENCIMENTO ANTECIPADO ADICIONADO
+      'hasAccelerationClause'
+    ]; 
+    const csvString = [headers.join(','), ...transfers.map(t => headers.map(h => { const val = t[h]; if (Array.isArray(val) || typeof val === 'object') return `"${JSON.stringify(val).replace(/"/g, '""')}"`; return JSON.stringify(val || ''); }).join(','))].join('\n'); const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([csvString], { type: 'text/csv;charset=utf-8;' })); link.setAttribute('download', `botafogo_db_full_${new Date().toISOString().slice(0,10)}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link); 
+  }, [transfers]);
+  
+  const handleImport = useCallback((e) => { 
+    const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); 
+    reader.onload = (evt) => { 
+      try { 
+        const text = evt.target.result; 
+        const lines = text.split('\n').filter(l => l.trim()); 
+        const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim()); 
+        const newTransfers = []; 
+        for (let i = 1; i < lines.length; i++) { 
+          const values = lines[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g); 
+          if (values && values.length >= headers.length) { 
+            const entry = {}; 
+            headers.forEach((header, index) => { 
+              let val = values[index] ? values[index].replace(/^"|"$/g, '').replace(/""/g, '"') : ''; 
+              // CAMPOS DE JSON ATUALIZADOS
+              if (['intermediaries', 'triggers', 'installmentsDetails', 'otherOwners', 'progressiveRaises'].includes(header)) { 
+                try { entry[header] = JSON.parse(val); } catch { entry[header] = []; } 
+              } 
+              // CAMPOS NUMÉRICOS ATUALIZADOS
+              else if (['value', 'marketValue', 'year', 'id', 'originalValue', 'exchangeRate', 'installments', 'playerBonus', 'agentBonus', 'safPercentage', 'salaryCLT', 'salaryImage'].includes(header)) entry[header] = Number(val) || 0; 
+              // CAMPOS BOOLEANOS ATUALIZADOS
+              else if (['isFixedRate', 'is100percent', 'hasProgressiveRaise', 'hasAccelerationClause'].includes(header)) entry[header] = val === 'true'; 
+              else entry[header] = val; 
+            }); 
+            if (!entry.id) entry.id = Date.now() + i; 
+            if (!entry.playerId) entry.playerId = entry.name ? entry.name.toLowerCase().replace(/\s+/g, '_') : `p_${entry.id}`; 
+            newTransfers.push(entry); 
+          } 
+        } 
+        if (window.confirm(`Importar ${newTransfers.length} registros?`)) onUpdate(newTransfers); 
+      } catch (err) { alert('Erro na importação CSV.'); } 
+    }; 
+    reader.readAsText(file); e.target.value = ''; 
+  }, [onUpdate]);
 
   return (
     <div className={`border rounded-3xl overflow-hidden flex flex-col h-[85vh] ${isDark ? 'bg-gradient-to-br from-gray-900 to-gray-900/50 border-gray-800' : 'bg-white border-gray-200 shadow-xl'}`}>
@@ -604,15 +742,15 @@ const PlayerDetailView = ({ player, allTransactions, onBack }) => {
       // Usa data de início para desempate
       return new Date(b.contractStartDate || 0) - new Date(a.contractStartDate || 0); 
     });
- 
+  
   const dob = playerHistory[0]?.dob; 
- 
+  
   // NOVO: Lógica de Status Atual do Elenco (para o Header)
   const [currentSquadStatus, mostRecentTransaction] = useMemo(() => {
     if (playerHistory.length === 0) {
       return [{ label: 'Sem Vínculo', color: 'text-gray-500', icon: ShieldOff }, null];
     }
-   
+    
     const mostRecent = playerHistory[0];
     const today = new Date();
     const endDate = mostRecent.contractEndDate ? new Date(mostRecent.contractEndDate + 'T00:00:00') : null;
@@ -628,11 +766,11 @@ const PlayerDetailView = ({ player, allTransactions, onBack }) => {
         return [{ label: 'Elenco Principal', color: 'text-green-500', icon: Shield }, mostRecent]; 
       }
     }
-   
+    
     // Se não está vigente, ou é 'sale'
     return [{ label: 'Sem Vínculo', color: 'text-gray-500', icon: ShieldOff }, mostRecent];
   }, [playerHistory]);
- 
+  
   const overdueItems = useMemo(() => {
     const items = [];
     playerHistory.forEach(t => {
@@ -651,7 +789,7 @@ const PlayerDetailView = ({ player, allTransactions, onBack }) => {
       {overdueItems.length > 0 && (<div className={`border-l-4 rounded-r-xl p-4 animate-pulse-slow ${isDark ? 'bg-red-950/40 border-red-500' : 'bg-red-50 border-red-500'}`}><div className="flex items-center gap-2 text-red-500 font-bold mb-2"><AlertTriangle className="w-5 h-5"/> ATENÇÃO: Pagamentos em Atraso Detectados</div><ul className="space-y-1">{overdueItems.map((item, idx) => (<li key={idx} className={`text-sm flex justify-between ${isDark ? 'text-red-300' : 'text-red-700'}`}><span>• {item.type} ({item.year}) - Venceu em {formatDate(item.date)}</span><span className="font-bold">{formatCurrency(item.value, false)}</span></li>))}</ul></div>)}
       <div className="flex items-center"><button onClick={onBack} className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-colors mr-4 ${isDark ? 'bg-gray-800 text-white hover:bg-gray-700' : 'bg-gray-100 text-gray-900 hover:bg-gray-200'}`}><ArrowLeft className="w-5 h-5" /><span className="font-semibold">Voltar</span></button><img src={player.photoUrl} onError={(e) => { e.target.src = 'https://placehold.co/100x100/2d3748/ffffff?text=Foto'; }} className={`w-20 h-20 rounded-full border-4 shadow-lg object-cover ${isDark ? 'border-gray-800 bg-black' : 'border-white bg-gray-100'}`} /><div className="ml-6"><h2 className={`text-4xl font-bold mb-1 ${isDark ? 'text-white' : 'text-gray-900'}`}>{player.name}</h2><div className={`flex items-center gap-3 text-lg ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
         <span className={`font-semibold px-3 py-1 rounded-lg ${isDark ? 'text-white bg-gray-800' : 'text-gray-900 bg-gray-100'}`}>{player.position}</span>
-       
+        
         {/* NOVO: Status do Elenco */}
         {currentSquadStatus && (
           <>
@@ -672,15 +810,15 @@ const PlayerDetailView = ({ player, allTransactions, onBack }) => {
       {/* INFO CONTRATO - ATUALIZADO */}
       {(trans.contractStartDate || trans.contractEndDate || trans.type) && (
           <div className={`px-6 py-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm border-b ${isDark ? 'bg-blue-900/10 text-blue-300 border-gray-800' : 'bg-blue-50 text-blue-700 border-gray-100'}`}>
-           
+            
             {/* NOVO: Lógica de Status (Vigente/Encerrado) e Tipo (Definitivo/Empréstimo) */}
             {(() => {
               const today = new Date();
               const endDate = trans.contractEndDate ? new Date(trans.contractEndDate + 'T00:00:00') : null;
-             
+              
               // 1. Tipo de Contrato
               const contractTypeLabel = (trans.type === 'loan_in' || trans.type === 'loan_out') ? 'Empréstimo' : 'Definitivo';
-             
+              
               // 2. Status do Contrato
               let contractStatus = { label: 'Indefinido', color: 'text-gray-500' };
               if (trans.type === 'sale') { 
@@ -708,52 +846,94 @@ const PlayerDetailView = ({ player, allTransactions, onBack }) => {
             <div className="flex items-center gap-2">
               <CalendarRange className="w-4 h-4"/> Vígencia: <span className="font-semibold">{formatDate(trans.contractStartDate)} até {formatDate(trans.contractEndDate)}</span>
             </div>
+            
+            {/* CAMPOS DE SALÁRIO MOVIDOS PARA CÁ */}
+            <div className="flex items-center gap-2">
+              <DollarSign className="w-4 h-4"/> Salário CLT: <span className="font-semibold">{formatCurrency(trans.salaryCLT || 0, false)}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <DollarSign className="w-4 h-4"/> Salário Imagem: <span className="font-semibold">{formatCurrency(trans.salaryImage || 0, false)}</span>
+            </div>
           </div>
         )}
       {/* NOVO: INFO PROPRIEDADE */}
       {(!trans.is100percent && trans.otherOwners?.length > 0) && (<div className={`px-6 py-3 border-b ${isDark ? 'bg-purple-900/10 border-gray-800' : 'bg-purple-50 border-gray-100'}`}><h4 className={`text-sm font-bold uppercase tracking-wider mb-2 flex items-center gap-2 ${isDark ? 'text-purple-300' : 'text-purple-700'}`}><PieChart className="w-4 h-4"/> Divisão de Propriedade</h4><div className="flex gap-4 text-sm"><span className={`font-semibold ${isDark ? 'text-white' : 'text-black'}`}>SAF: {trans.safPercentage}%</span>{trans.otherOwners.map((o, i) => (<span key={i} className={isDark ? 'text-gray-400' : 'text-gray-600'}>{o.name}: {o.percentage}%</span>))}</div></div>)}
-      <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="space-y-6"><div><h4 className={`text-sm font-bold uppercase tracking-wider border-b pb-2 mb-3 flex items-center gap-2 ${isDark ? 'text-gray-400 border-gray-800' : 'text-gray-500 border-gray-200'}`}><DollarSign className="w-4 h-4"/> Condições de Pagamento</h4><div className="grid grid-cols-2 gap-4 text-sm"><div><span className="text-gray-500 block">Forma:</span> <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{trans.paymentMethod || '-'}</span></div><div><span className="text-gray-500 block">Parcelas:</span> <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{trans.installments || 1}x</span></div><div><span className="text-gray-500 block">Luvas Jogador:</span> <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{formatCurrency(trans.playerBonus || 0, false)}</span> <span className={`text-xs ${isOverdue(trans.playerBonusDate) ? 'text-red-500 font-bold' : 'text-gray-500'}`}>({formatDate(trans.playerBonusDate)})</span></div><div><span className="text-gray-500 block">Luvas Intermed.:</span> <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{formatCurrency(trans.agentBonus || 0, false)}</span> <span className={`text-xs ${isOverdue(trans.agentBonusDate) ? 'text-red-500 font-bold' : 'text-gray-500'}`}>({formatDate(trans.agentBonusDate)})</span></div></div>{trans.intermediaries?.length > 0 && (<div className="mt-4"><span className="text-gray-500 block text-sm mb-1">Intermediários Envolvidos:</span><ul className={`rounded-lg p-2 space-y-1 ${isDark ? 'bg-black/20' : 'bg-gray-100'}`}>{trans.intermediaries.map((agent, i) => (<li key={i} className="text-sm flex justify-between"><span className={isDark ? 'text-gray-300' : 'text-gray-700'}>{agent.name}</span><span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{formatCurrency(agent.value || 0, false)}</span></li>))}</ul></div>)}</div>
+      <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="space-y-6"><div><h4 className={`text-sm font-bold uppercase tracking-wider border-b pb-2 mb-3 flex items-center gap-2 ${isDark ? 'text-gray-400 border-gray-800' : 'text-gray-500 border-gray-200'}`}><DollarSign className="w-4 h-4"/> Condições de Pagamento</h4>
+        {/* ATUALIZADO: Grid para 2 colunas */}
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div><span className="text-gray-500 block">Forma:</span> <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{trans.paymentMethod || '-'}</span></div>
+          <div><span className="text-gray-500 block">Parcelas:</span> <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{trans.installments || 1}x</span></div>
+          
+          {/* CAMPOS DE SALÁRIO REMOVIDOS DESTA SEÇÃO */}
+
+          <div><span className="text-gray-500 block">Luvas Jogador:</span> <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{formatCurrency(trans.playerBonus || 0, false)}</span> <span className={`text-xs ${isOverdue(trans.playerBonusDate) ? 'text-red-500 font-bold' : 'text-gray-500'}`}>({formatDate(trans.playerBonusDate)})</span></div>
+          <div><span className="text-gray-500 block">Luvas Intermed.:</span> <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{formatCurrency(trans.agentBonus || 0, false)}</span> <span className={`text-xs ${isOverdue(trans.agentBonusDate) ? 'text-red-500 font-bold' : 'text-gray-500'}`}>({formatDate(trans.agentBonusDate)})</span></div>
+        </div>
+        
+        {trans.intermediaries?.length > 0 && (<div className="mt-4"><span className="text-gray-500 block text-sm mb-1">Intermediários Envolvidos:</span><ul className={`rounded-lg p-2 space-y-1 ${isDark ? 'bg-black/20' : 'bg-gray-100'}`}>{trans.intermediaries.map((agent, i) => (<li key={i} className="text-sm flex justify-between"><span className={isDark ? 'text-gray-300' : 'text-gray-700'}>{agent.name}</span><span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{formatCurrency(agent.value || 0, false)}</span></li>))}</ul></div>)}
+        
+        {/* LISTA DE AUMENTOS SALARIAIS ADICIONADA */}
+        {trans.hasProgressiveRaise && trans.progressiveRaises?.length > 0 && (
+          <div className="mt-4">
+            <span className="text-gray-500 block text-sm mb-1">Aumentos Salariais Programados:</span>
+            <ul className={`rounded-lg p-2 space-y-1 ${isDark ? 'bg-black/20' : 'bg-gray-100'}`}>
+              {trans.progressiveRaises.map((raise, i) => (
+                <li key={i} className="text-sm flex justify-between items-center">
+                  <span className={isDark ? 'text-gray-300' : 'text-gray-700'}>
+                    Em: {formatDate(raise.date)}
+                  </span>
+                  <span className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                    {/* Formata o valor corretamente */}
+                    + {raise.unit === '%' ? `${raise.value}%` : `${CURRENCIES[raise.unit]?.symbol || raise.unit} ${Number(raise.value).toLocaleString('pt-BR')}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+      </div>
       {/* CRONOGRAMA DE PARCELAS */}
       {trans.installmentsDetails?.length > 0 && (<div><h4 className={`text-sm font-bold uppercase tracking-wider border-b pb-2 mb-3 flex items-center gap-2 ${isDark ? 'text-gray-400 border-gray-800' : 'text-gray-500 border-gray-200'}`}><CheckSquare className="w-4 h-4"/> Cronograma de Pagamentos</h4><div className="space-y-2">{trans.installmentsDetails.map((inst, i) => { 
-            // Lógica de status atualizada
-            const status = getInstallmentStatusProps(inst);
-            const StatusIcon = status.icon;
-           
-            return (
-              <div key={i} className={`flex items-center justify-between p-2 rounded-lg text-sm ${isDark ? 'bg-black/20' : 'bg-gray-100'} ${status.label === 'Atrasado' ? 'border border-red-500/50' : (status.label === 'Vence em breve' ? 'border border-orange-500/50' : '')}`}>
-               
-                <div className="flex items-center gap-3">
-                  {/* Ícone de Status (substitui a bolinha) */}
-                  <StatusIcon className={`w-4 h-4 ${status.color}`} />
-                  <span className={isDark ? 'text-gray-300' : 'text-gray-700'}>Parcela {inst.number}/{trans.installments}</span>
-                </div>
-               
-                <div className="text-right">
-                  <div className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{formatCurrency(inst.value, false)}</div>
-                  {/* Label de Status e Data */}
-                  <div className={`text-xs flex items-center justify-end gap-1 ${status.color} ${status.label === 'Atrasado' ? 'font-bold' : ''}`}>
-                    <span>{status.label}</span>
-                    {/* Não mostra a data se já estiver pago */}
-                    {status.label !== 'Pago' && <span>({formatDate(inst.date)})</span>}
+                // Lógica de status atualizada
+                const status = getInstallmentStatusProps(inst);
+                const StatusIcon = status.icon;
+                
+                return (
+                  <div key={i} className={`flex items-center justify-between p-2 rounded-lg text-sm ${isDark ? 'bg-black/20' : 'bg-gray-100'} ${status.label === 'Atrasado' ? 'border border-red-500/50' : (status.label === 'Vence em breve' ? 'border border-orange-500/50' : '')}`}>
+                    
+                    <div className="flex items-center gap-3">
+                      {/* Ícone de Status (substitui a bolinha) */}
+                      <StatusIcon className={`w-4 h-4 ${status.color}`} />
+                      <span className={isDark ? 'text-gray-300' : 'text-gray-700'}>Parcela {inst.number}/{trans.installments}</span>
+                    </div>
+                    
+                    <div className="text-right">
+                      <div className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{formatCurrency(inst.value, false)}</div>
+                      {/* Label de Status e Data */}
+                      <div className={`text-xs flex items-center justify-end gap-1 ${status.color} ${status.label === 'Atrasado' ? 'font-bold' : ''}`}>
+                        <span>{status.label}</span>
+                        {/* Não mostra a data se já estiver pago */}
+                        {status.label !== 'Pago' && <span>({formatDate(inst.date)})</span>}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            ); 
-          })}</div></div>)}</div><div className="space-y-4"><h4 className={`text-sm font-bold uppercase tracking-wider border-b pb-2 mb-3 flex items-center gap-2 ${isDark ? 'text-gray-400 border-gray-800' : 'text-gray-500 border-gray-200'}`}><Target className="w-4 h-4"/> Gatilhos & Bônus</h4>{trans.triggers?.length > 0 ? (<ul className="space-y-2">{trans.triggers.map((trig, i) => { 
-       
+                ); 
+              })}</div></div>)}</div><div className="space-y-4"><h4 className={`text-sm font-bold uppercase tracking-wider border-b pb-2 mb-3 flex items-center gap-2 ${isDark ? 'text-gray-400 border-gray-800' : 'text-gray-500 border-gray-200'}`}><Target className="w-4 h-4"/> Gatilhos & Bônus</h4>{trans.triggers?.length > 0 ? (<ul className="space-y-2">{trans.triggers.map((trig, i) => { 
+        
         // ATUALIZADO: Adicionado fallback caso o status 'pending' ainda exista em dados antigos
         const status = TRIGGER_STATUS[trig.status] || { label: 'Pendente', color: 'text-yellow-500', icon: Clock }; 
         const Icon = status.icon; 
         // const overdue = (trig.status === 'hit' && !trig.isPaid && isOverdue(trig.date)); // REMOVIDO
-       
+        
         // Lógica para status de pagamento
         const paymentStatus = trig.isPaid ? 
-          { label: 'Pago', color: 'text-blue-500', icon: CheckCircle } :
-          (trig.status === 'hit' ? 
-              { label: 'Pgto. Pendente', color: 'text-yellow-500', icon: Clock } :
-              { label: 'N/A', color: 'text-gray-500', icon: X }
-          );
-       
+            { label: 'Pago', color: 'text-blue-500', icon: CheckCircle } :
+            (trig.status === 'hit' ? 
+                { label: 'Pgto. Pendente', color: 'text-yellow-500', icon: Clock } :
+                { label: 'N/A', color: 'text-gray-500', icon: X }
+            );
+        
         // NOVO: Lógica para formatar valor do gatilho com moeda correta
         const triggerValue = trig.value || 0;
         const triggerCurrency = trig.currency || 'EUR';
@@ -771,7 +951,7 @@ const PlayerDetailView = ({ player, allTransactions, onBack }) => {
         return (<li key={i} className={`rounded-lg p-3 flex items-center justify-between ${isDark ? 'bg-black/20' : 'bg-gray-100'}`}> {/* overdue class removido */}
           <div className="flex-1">
             <div className={`font-medium flex items-center gap-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>{trig.description}</div>
-           
+            
             {/* NOVO: Mostrar data de pagamento se houver */}
             {trig.paymentDate && (
               <div className="text-xs text-blue-400">
@@ -779,7 +959,7 @@ const PlayerDetailView = ({ player, allTransactions, onBack }) => {
               </div>
             )}
           </div>
-       
+        
         <div className="text-right">
           {/* ATUALIZADO: Exibe o valor com a moeda correta */}
           <div className={`font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{triggerValueDisplay}</div>
@@ -820,7 +1000,7 @@ const AppContent = () => {
   const uniqueYears = useMemo(() => [...new Set(transfers.map(t => t.year))].sort((a, b) => b - a), [transfers]);
   const uniquePositions = useMemo(() => [...new Set(transfers.map(t => t.position))].sort(), [transfers]);
   const filteredData = useMemo(() => { return transfers.filter(t => { const yearMatch = selectedYear === 'all' || t.year === selectedYear; const typeMatch = selectedType === 'all' || t.type === selectedType; const posMatch = selectedPosition === 'all' || t.position === selectedPosition; return yearMatch && typeMatch && posMatch; }); }, [transfers, selectedYear, selectedType, selectedPosition]);
- 
+  
   // Atualizado: Cálculo da Idade Média
   const kpis = useMemo(() => { 
     const data = selectedYear === 'all' ? transfers : transfers.filter(t => t.year === selectedYear); 
@@ -828,7 +1008,7 @@ const AppContent = () => {
     const buys = data.filter(t => t.type === 'buy'); 
     const totalSales = sales.reduce((sum, t) => sum + t.value, 0); 
     const totalBuys = buys.reduce((sum, t) => sum + t.value, 0); 
-   
+    
     // Usa 'filteredData' se houver filtro, senão usa 'data' (baseada no ano)
     const avgAgeData = filteredData.length > 0 ? filteredData : data; 
     const ages = avgAgeData.map(t => calculateAge(t.dob, t.year)).filter(age => typeof age === 'number' && age > 0);
@@ -856,7 +1036,7 @@ const AppContent = () => {
           aVal = a[sortConfig.key];
           bVal = b[sortConfig.key];
         }
-       
+        
         if (typeof aVal === 'string') aVal = aVal.toLowerCase(); 
         if (typeof bVal === 'string') bVal = bVal.toLowerCase(); 
         if (aVal < bVal) return sortConfig.direction === 'ascending' ? -1 : 1; 
@@ -866,12 +1046,12 @@ const AppContent = () => {
     } 
     return sortableData; 
   }, [filteredData, sortConfig]);
- 
+  
   const requestSort = useCallback((key) => { setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'descending' ? 'ascending' : 'descending' })); }, []);
   const requestClubSort = useCallback((key) => { setClubSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'ascending' ? 'descending' : 'ascending' })); }, []);
- 
+  
   const clubData = useMemo(() => { const clubs = {}; transfers.forEach(t => { if (!t.club || t.club === 'Sem clube') return; if (!clubs[t.club]) { clubs[t.club] = { buys: 0, sales: 0, balance: 0, transactions: 0 }; } if (t.type === 'buy') clubs[t.club].buys += t.value; else if (t.type === 'sale') clubs[t.club].sales += t.value; clubs[t.club].transactions++; }); let processed = Object.entries(clubs).map(([name, data]) => ({ name, ...data, balance: data.sales - data.buys })); if (clubSortConfig.key) { processed.sort((a, b) => { let aVal = a[clubSortConfig.key]; let bVal = b[clubSortConfig.key]; if (typeof aVal === 'string') aVal = aVal.toLowerCase(); if (typeof bVal === 'string') bVal = bVal.toLowerCase(); if (aVal < bVal) return clubSortConfig.direction === 'ascending' ? -1 : 1; if (aVal > bVal) return clubSortConfig.direction === 'ascending' ? 1 : -1; return 0; }); } return processed; }, [transfers, clubSortConfig]); 
- 
+  
   const handlePlayerClick = useCallback((player) => { setPreviousViewMode(viewMode); setSelectedPlayer(player); setViewMode('playerDetail'); }, [viewMode]);
   const handleBackClick = useCallback(() => { setViewMode(previousViewMode); setSelectedPlayer(null); }, [previousViewMode]);
   const handleManageClick = useCallback(() => { if (viewMode !== 'manage') { setPreviousViewMode(viewMode); setViewMode('manage'); } }, [viewMode]);
@@ -905,7 +1085,7 @@ const AppContent = () => {
               </button>
               {/* Botão Home Fixo */}
               <button onClick={goHome} className={`p-2 rounded-full transition-colors ${isDark ? 'bg-gray-800 text-blue-400 hover:bg-gray-700' : 'bg-gray-100 text-blue-600 hover:bg-gray-200'}`} title="Ir para Início">
-                  <Home className="w-5 h-5" />
+                 <Home className="w-5 h-5" />
               </button>
 
               {!['manage', 'playerDetail'].includes(viewMode) && (
